@@ -1,0 +1,20 @@
+---
+- name: Connect to FortiOS and execute show command
+  hosts: fortios_hosts
+  gather_facts: no
+  vars:
+    ansible_user: your_username
+    ansible_ssh_pass: your_password
+    ansible_connection: network_cli
+    ansible_network_os: fortios
+
+  tasks:
+    - name: Execute show command on FortiOS
+      fortios_command:
+        commands:
+          - show version
+      register: show_command_output
+
+    - name: Print show command output
+      debug:
+        msg: "{{ show_command_output.stdout }}"
