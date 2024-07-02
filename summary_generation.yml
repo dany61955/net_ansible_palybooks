@@ -91,7 +91,7 @@
 
     - name: Load host results
       set_fact:
-        host_results: "{{ host_results | default({}) | combine({ item.path.split('/')[-1].split('.')[0]: lookup('file', item.path) | from_json }) }}"
+        host_results: "{{ host_results | default({}) | combine({ item.path | basename | regex_replace('\\.[^.]*$', ''): lookup('file', item.path) | from_json }) }}"
       loop: "{{ json_files.files }}"
 
     - name: Generate CSV from host results
