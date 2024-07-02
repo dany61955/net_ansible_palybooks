@@ -14,8 +14,10 @@ def generate_csv(input_json_file, output_csv_file):
         with open(output_csv_file, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=csv_headers)
             writer.writeheader()
-            for item in data.values():
-                writer.writerow(item)
+            
+            for hostname, records in data.items():
+                for record in records:
+                    writer.writerow(record)
 
         return True, None
     except Exception as e:
