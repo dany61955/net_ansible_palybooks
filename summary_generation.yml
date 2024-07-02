@@ -1,0 +1,98 @@
+---
+- name: Check device versions and compare with target
+  hosts: all
+  gather_facts: no
+  vars:
+    input_dict: "{{ input_dict }}"
+  tasks:
+    - name: Gather device facts
+      ios_facts:
+        gather_subset:
+          - hardware
+          - version
+
+    - name: Set current version and model
+      set_fact:
+        current_version: "{{ ansible_net_version }}"
+        current_model: "{{ ansible_net_model }}"
+
+    - name: Initialize result dictionary
+      set_fact:
+        result_dict: {}
+
+    - name: Iterate over input dictionary and set result_dict
+      set_fact:
+        result_dict: >-
+          {{
+            result_dict | combine({
+              item.model: {
+                'hostname': inventory_hostname,
+                'device_ip': ansible_host,
+                'current_version': current_version,
+                'target_version': item.target_version,
+                'model': current_model,
+                'target_version_satisfied': (current_version is version(item.target_version, '>=')),
+                'target_ios': item.target_ios,
+                'target_ios_md5': item.target_ios_md5,
+                'target_image_presence': False,
+                'md5_checksum_success': False
+              }
+            })
+          }}
+      loop: "{{ input_dict }}"
+      when: current_model == item.model
+
+    - name: Check if target image is present
+      ios_command:
+        commands:
+          - dir flash:
+      register: dir_output
+
+    - name: Update image presence status in result_dict
+      set_fact:
+        result_dict: >-
+          {{
+            result_dict | combine({
+              current_model: {
+                result_dict[current_model] | combine({
+                  'target_image_presence': (result_dict[current_model].target_ios in dir_output.stdout)
+                })
+              }
+            })
+          }}
+      when: "'{{ result_dict[current_model].target_ios }}' in dir_output.stdout"
+
+    - name: Check if target image MD5 checksum matches
+      ios_command:
+        commands:
+          - verify /md5 flash:{{ result_dict[current_model].target_ios }} {{ result_dict[current_model].target_ios_md5 }}
+      register: md5_output
+      when: "'{{ result_dict[current_model].target_ios }}' in dir_output.stdout"
+
+    - name: Update MD5 checksum status in result_dict
+      set_fact:
+        result_dict: >-
+          {{
+            result_dict | combine({
+              current_model: {
+                result_dict[current_model] | combine({
+                  'md5_checksum_success': ('OK' in md5_output.stdout)
+                })
+              }
+            })
+          }}
+      when: "'{{ result_dict[current_model].target_ios }}' in dir_output.stdout"
+
+    - name: Collect results
+      set_fact:
+        output_results: "{{ hostvars[inventory_hostname].result_dict }}"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Append results to output file
+      lineinfile:
+        path: /tmp/device_versions.json
+        line: "{{ output_results | to_json }}"
+        create: yes
+      delegate_to: localhost
+      run_once: true
