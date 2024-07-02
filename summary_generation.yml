@@ -4,6 +4,7 @@
   gather_facts: no
   vars:
     input_dict: "{{ input_dict }}"
+    output_results: []
   tasks:
     - name: Gather device facts
       ios_facts:
@@ -83,16 +84,16 @@
           }}
       when: "'{{ result_dict[current_model].target_ios }}' in dir_output.stdout"
 
-    - name: Collect results
-      set_fact:
-        output_results: "{{ hostvars[inventory_hostname].result_dict }}"
+    - name: Save results to JSON file
+      copy:
+        content: "{{ result_dict | to_json }}"
+        dest: /tmp/device_versions.json
       delegate_to: localhost
       run_once: true
 
-    - name: Append results to output file
-      lineinfile:
-        path: /tmp/device_versions.json
-        line: "{{ output_results | to_json }}"
-        create: yes
+    - name: Generate CSV from JSON file
+      generate_csv:
+        input_json_file: /tmp/device_versions.json
+        output_csv_file: /tmp/device_versions.csv
       delegate_to: localhost
       run_once: true
