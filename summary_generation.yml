@@ -26,7 +26,7 @@
         result_dict: >-
           {{
             result_dict | combine({
-              item.model: {
+              inventory_hostname: result_dict[inventory_hostname] | default([]) + [{
                 'hostname': inventory_hostname,
                 'device_ip': ansible_host,
                 'current_version': current_version,
@@ -37,11 +37,11 @@
                 'target_ios_md5': item.target_ios_md5,
                 'target_image_presence': False,
                 'md5_checksum_success': False
-              }
+              }]
             })
           }}
       loop: "{{ input_dict }}"
-      when: current_model == item.model
+      when: current_model | regex_search('^' + item.model)
 
     - name: Check if target image is present
       ios_command:
@@ -54,35 +54,34 @@
         result_dict: >-
           {{
             result_dict | combine({
-              current_model: {
-                result_dict[current_model] | combine({
-                  'target_image_presence': (result_dict[current_model].target_ios in dir_output.stdout)
-                })
-              }
+              inventory_hostname: result_dict[inventory_hostname] | default([]) | map('combine', [{
+                'target_image_presence': (item.target_ios in dir_output.stdout)
+              }]) | list
             })
           }}
-      when: "'{{ result_dict[current_model].target_ios }}' in dir_output.stdout"
+      loop: "{{ result_dict[inventory_hostname] }}"
+      when: item.target_ios in dir_output.stdout
 
     - name: Check if target image MD5 checksum matches
       ios_command:
         commands:
-          - verify /md5 flash:{{ result_dict[current_model].target_ios }} {{ result_dict[current_model].target_ios_md5 }}
+          - verify /md5 flash:{{ item.target_ios }} {{ item.target_ios_md5 }}
       register: md5_output
-      when: "'{{ result_dict[current_model].target_ios }}' in dir_output.stdout"
+      when: item.target_ios in dir_output.stdout
+      loop: "{{ result_dict[inventory_hostname] }}"
 
     - name: Update MD5 checksum status in result_dict
       set_fact:
         result_dict: >-
           {{
             result_dict | combine({
-              current_model: {
-                result_dict[current_model] | combine({
-                  'md5_checksum_success': ('OK' in md5_output.stdout)
-                })
-              }
+              inventory_hostname: result_dict[inventory_hostname] | default([]) | map('combine', [{
+                'md5_checksum_success': ('OK' in md5_output.stdout)
+              }]) | list
             })
           }}
-      when: "'{{ result_dict[current_model].target_ios }}' in dir_output.stdout"
+      loop: "{{ result_dict[inventory_hostname] }}"
+      when: item.target_ios in dir_output.stdout
 
     - name: Save results to JSON file
       copy:
