@@ -1,0 +1,107 @@
+---
+- name: Check device versions and compare with target
+  hosts: all
+  gather_facts: no
+  vars:
+    input_dict: "{{ input_dict }}"
+  tasks:
+    - name: Gather device facts
+      ios_facts:
+        gather_subset:
+          - hardware
+          - version
+      ignore_errors: yes
+      register: ios_facts_result
+
+    - name: Set current version and model
+      set_fact:
+        current_version: "{{ ansible_net_version | default('N/A') }}"
+        current_model: "{{ ansible_net_model | default('N/A') }}"
+      when: not ios_facts_result.failed
+
+    - name: Set facts for devices that failed to connect
+      set_fact:
+        current_version: "N/A"
+        current_model: "N/A"
+      when: ios_facts_result.failed
+
+    - name: Iterate over input dictionary and set facts for each host
+      set_fact:
+        target_version: "{{ item.target_version }}"
+        target_ios: "{{ item.target_ios }}"
+        target_ios_md5: "{{ item.target_ios_md5 }}"
+        target_version_satisfied: "{{ current_version is version(item.target_version, '>=') | default(false) }}"
+        target_image_presence: "Failed"
+        md5_checksum_success: false
+      loop: "{{ input_dict }}"
+      when: current_model | regex_search('^' + item.model)
+
+    - name: Ensure variables are always set
+      set_fact:
+        target_version: "{{ target_version | default('N/A') }}"
+        target_ios: "{{ target_ios | default('N/A') }}"
+        target_ios_md5: "{{ target_ios_md5 | default('N/A') }}"
+        target_version_satisfied: "{{ target_version_satisfied | default(false) }}"
+        target_image_presence: "{{ target_image_presence | default('Failed') }}"
+        md5_checksum_success: "{{ md5_checksum_success | default(false) }}"
+    
+    - name: Check if target image is present
+      ios_command:
+        commands:
+          - dir flash:
+      register: dir_output
+      when: not ios_facts_result.failed
+
+    - name: Update image presence status
+      set_fact:
+        target_image_presence: >-
+          {% if dir_output is defined %}
+            {% if target_ios in dir_output.stdout %}
+              yes
+            {% else %}
+              no
+            {% endif %}
+          {% else %}
+            Failed
+          {% endif %}
+      when: not ios_facts_result.failed
+
+    - name: Check if target image MD5 checksum matches
+      ios_command:
+        commands:
+          - verify /md5 flash:{{ target_ios }} {{ target_ios_md5 }}
+      register: md5_output
+      when: target_ios in dir_output.stdout and not ios_facts_result.failed
+
+    - name: Update MD5 checksum status
+      set_fact:
+        md5_checksum_success: "{{ 'OK' in md5_output.stdout }}"
+      when: target_ios in dir_output.stdout and not ios_facts_result.failed
+
+    - name: Save results to a JSON file on the controller
+      local_action:
+        module: copy
+        content: >
+          {{
+            {
+              "hostname": inventory_hostname,
+              "device_ip": ansible_host,
+              "current_version": current_version | default("N/A"),
+              "target_version": target_version | default("N/A"),
+              "model": current_model | default("N/A"),
+              "target_version_satisfied": target_version_satisfied | default(false),
+              "target_image_presence": target_image_presence | default("Failed"),
+              "md5_checksum_success": md5_checksum_success | default(false),
+              "error": ios_facts_result.failed | default(false)
+            } | to_json
+          }}
+        dest: "/tmp/device_versions_{{ inventory_hostname }}.json"
+      delegate_to: localhost
+
+- name: Gather results from all hosts and generate CSV
+  hosts: localhost
+  tasks:
+    - name: Find all JSON files
+      find:
+        paths: /tmp
+       
