@@ -1,0 +1,39 @@
+---
+- name: Retrieve command output via API
+  hosts: localhost
+  gather_facts: no
+  vars:
+    api_url: "http://example.com/api/v1/command"  # Replace with your API endpoint
+    api_username: "your_username"               # Replace with your username
+    api_password: "your_password"               # Replace with your password
+    command_to_run: "show system info"          # The command to execute
+
+  tasks:
+    - name: Send API request to execute command
+      uri:
+        url: "{{ api_url }}"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        body:
+          command: "{{ command_to_run }}"
+        body_format: json
+        user: "{{ api_username }}"
+        password: "{{ api_password }}"
+        force_basic_auth: yes
+        return_content: yes
+      register: command_output
+
+    - name: Check if the API call was successful
+      fail:
+        msg: "API call failed: {{ command_output.json }}"
+      when: command_output.status != 200
+
+    - name: Save the command output to a JSON file
+      copy:
+        content: "{{ command_output.json | to_nice_json }}"
+        dest: "./output_{{ command_to_run.replace(' ', '_') }}.json"
+
+    - name: Debug the command output
+      debug:
+        msg: "{{ command_output.json }}"
